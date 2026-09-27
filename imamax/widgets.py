@@ -7,20 +7,33 @@ from PyQt6.QtWidgets import (
 )
 
 from .icons import icon
+from .utils import screen_pixel_size
 
-# (label, ratio spec): None = free, "original" = the image's own ratio,
-# (a, b) = a:b in landscape orientation.
+# (label, ratio spec, description). Spec: None = free, "original" = the
+# image's own ratio, "screen" = the monitor's, (a, b) = a:b in landscape
+# orientation. A None entry is a separator.
 RATIO_PRESETS = [
-    ("Free", None),
-    ("Original", "original"),
-    ("Square", (1, 1)),
-    ("4:3", (4, 3)),
-    ("3:2", (3, 2)),
-    ("5:4", (5, 4)),
-    ("7:5", (7, 5)),
-    ("16:9", (16, 9)),
-    ("16:10", (16, 10)),
+    ("Free", None, "Any shape"),
+    ("Original", "original", "Keep the image's own proportions"),
+    ("Screen", "screen", "Match this monitor, for a wallpaper that fills it exactly"),
+    None,
+    ("Square", (1, 1), "Profile pictures, social posts"),
+    ("5:4", (5, 4), "8×10 prints, older monitors"),
+    ("4:3", (4, 3), "Compact cameras, iPad, classic TV"),
+    ("3:2", (3, 2), "35 mm photos, 4×6 prints, Surface"),
+    ("16:10", (16, 10), "Laptops and WUXGA / WQXGA monitors"),
+    ("16:9", (16, 9), "HD / 4K monitors and TVs, video"),
+    None,
+    ("2:1", (2, 1), "Univisium, wide phone wallpapers"),
+    ("21:9", (21, 9), "Ultrawide monitors (2560×1080, 3440×1440)"),
+    ("32:9", (32, 9), "Super-ultrawide monitors (5120×1440)"),
+    None,
+    ("19.5:9", (19.5, 9), "Modern phones — press X for portrait"),
 ]
+
+_SPEC_ROLE = Qt.ItemDataRole.UserRole
+_LABEL_ROLE = Qt.ItemDataRole.UserRole + 1
+
 
 CROP_HELP = (
     "<b>Crop tool</b><table cellpadding='2'>"
@@ -76,8 +89,15 @@ class CropBar(QFrame):
         self._ratio_combo = QComboBox()
         self._ratio_combo.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._ratio_combo.setToolTip("Lock the selection to a shape")
-        for label, spec in RATIO_PRESETS:
+        for preset in RATIO_PRESETS:
+            if preset is None:
+                self._ratio_combo.insertSeparator(self._ratio_combo.count())
+                continue
+            label, spec, description = preset
             self._ratio_combo.addItem(label, spec)
+            i = self._ratio_combo.count() - 1
+            self._ratio_combo.setItemData(i, label, _LABEL_ROLE)
+            self._ratio_combo.setItemData(i, description, Qt.ItemDataRole.ToolTipRole)
         self._ratio_combo.currentIndexChanged.connect(self._on_ratio_selected)
         row.addWidget(self._ratio_combo)
 
@@ -165,12 +185,19 @@ class CropBar(QFrame):
         spec = self._ratio_combo.currentData()
         if spec is None:
             return None
+        a, b = self._landscape_sides(spec)
+        return b / a if self._portrait else a / b
+
+    def _landscape_sides(self, spec):
+        """(long, short) sides for a ratio spec."""
         if spec == "original":
             w, h = self._image_size.width(), self._image_size.height()
-            a, b = max(w, h), min(w, h)
+        elif spec == "screen":
+            size = screen_pixel_size(self.screen())
+            w, h = size.width(), size.height()
         else:
-            a, b = spec
-        return b / a if self._portrait else a / b
+            return spec
+        return max(w, h), max(1, min(w, h))
 
     def toggle_orientation(self):
         if self._ratio_combo.currentData() is None:
@@ -183,13 +210,24 @@ class CropBar(QFrame):
     # ── Internal ─────────────────────────────────────────────────────
 
     def _refresh_labels(self):
-        for i, (label, spec) in enumerate(RATIO_PRESETS):
-            if isinstance(spec, tuple) and spec[0] != spec[1] and self._portrait:
-                label = f"{spec[1]}:{spec[0]}"
-            self._ratio_combo.setItemText(i, label)
-        self._swap_btn.setEnabled(self._ratio_combo.currentData() != (1, 1))
+        combo = self._ratio_combo
+        for i in range(combo.count()):
+            label, spec = combo.itemData(i, _LABEL_ROLE), combo.itemData(i)
+            if label is None:
+                continue  # separator
+            if isinstance(spec, tuple) and spec[0] != spec[1]:
+                a, b = spec
+                label = f"{b:g}:{a:g}" if self._portrait else f"{a:g}:{b:g}"
+            elif spec == "screen":
+                size = screen_pixel_size(self.screen())
+                label = f"Screen ({size.width()} × {size.height()})"
+            combo.setItemText(i, label)
+        self._swap_btn.setEnabled(combo.currentData() != (1, 1))
 
     def _on_ratio_selected(self, _index):
+        if self._ratio_combo.currentData() == "screen":
+            size = screen_pixel_size(self.screen())
+            self._portrait = size.height() > size.width()  # follow the monitor, not the photo
         self._refresh_labels()
         self.ratio_changed.emit(self.current_ratio())
 

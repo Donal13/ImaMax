@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QColor, QImage, QImageReader, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QGuiApplication, QImage, QImageReader, QPainter, QPixmap
 from PIL import Image, ImageEnhance, ImageFilter
 
 SUPPORTED_FORMATS = (
@@ -34,6 +34,27 @@ def load_image(filepath):
     if image.isNull():
         return QPixmap(), False
     return QPixmap.fromImage(image), is_animated
+
+
+def clipboard_pixmap():
+    """Image on the clipboard as a QPixmap (null if there is none)."""
+    clipboard = QGuiApplication.clipboard()
+    pixmap = clipboard.pixmap()
+    if pixmap.isNull():
+        img = clipboard.image()
+        if not img.isNull():
+            pixmap = QPixmap.fromImage(img)
+    return pixmap
+
+
+def screen_pixel_size(screen=None):
+    """Physical pixel size of `screen` (default: the primary screen)."""
+    screen = screen or QGuiApplication.primaryScreen()
+    if screen is None:
+        return QSize(1920, 1080)
+    dpr = screen.devicePixelRatio()
+    size = screen.size()
+    return QSize(round(size.width() * dpr), round(size.height() * dpr))
 
 
 def qpixmap_to_pil(pixmap):

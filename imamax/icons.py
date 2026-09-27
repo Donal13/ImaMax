@@ -72,6 +72,16 @@ _ICONS = {
     "close": '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
     "keyboard": '<rect x="2.5" y="6" width="19" height="12" rx="1.5"/>'
                 '<path d="M6 9.8v.01M9.3 9.8v.01M12.6 9.8v.01M15.9 9.8v.01M18 9.8v.01M8 14.2h8"/>',
+    "wallpaper": '<rect x="2.5" y="3.5" width="19" height="13.5" rx="1.5"/><path d="M8 21h8M12 17v4"/>'
+                 '<path d="M10.5 3.5V17M10.5 10h11"/>',
+    "add_to_wallpaper": '<rect x="2.5" y="3.5" width="14" height="11" rx="1.5"/>'
+                        '<path d="M9 3.5v11M9 9h7.5"/><path d="M19 14v7M15.5 17.5h7"/>',
+    "shuffle": '<path d="M3 7h3.5c4.5 0 6.5 10 11 10H21M18 14l3 3-3 3"/>'
+               '<path d="M3 17h3.5c1.8 0 3-1.6 4.2-3.6M13.3 10.6C14.5 8.6 15.7 7 17.5 7H21M18 4l3 3-3 3"/>',
+    "new": '<path d="M14 3.5H7a1 1 0 0 0-1 1v15a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7.5z"/>'
+           '<path d="M14 3.5v4h4M12 11v6M9 14h6"/>',
+    "image": '<rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><circle cx="9" cy="9.5" r="1.6"/>'
+             '<path d="M4 17.5l5-5 3.5 3.5 2.5-2.5 5 5"/>',
     "arrow_up": '<path d="M12 19V5M6 11l6-6 6 6"/>',
     "arrow_down": '<path d="M12 5v14M6 13l6 6 6-6"/>',
     "arrow_left": '<path d="M19 12H5M11 6l-6 6 6 6"/>',

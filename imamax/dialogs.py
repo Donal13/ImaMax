@@ -98,6 +98,7 @@ class PasteDialog(QDialog):
     """
 
     SIDES = ("top", "left", "right", "bottom")
+    TO_WALLPAPER = 2  # exec() result: continue in the Wallpaper Maker
 
     def __init__(self, current, pasted, settings, parent=None):
         super().__init__(parent)
@@ -161,6 +162,11 @@ class PasteDialog(QDialog):
         ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setText("Paste")
         ok.setIcon(icon("paste_side"))
+        maker = buttons.addButton("Wallpaper Maker…", QDialogButtonBox.ButtonRole.ActionRole)
+        maker.setIcon(icon("wallpaper"))
+        maker.setAutoDefault(False)
+        maker.setToolTip("Continue in the Wallpaper Maker, where you can add more images")
+        maker.clicked.connect(self._to_wallpaper)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -226,7 +232,15 @@ class PasteDialog(QDialog):
             return
         super().keyPressEvent(event)
 
+    def _to_wallpaper(self):
+        self._save_settings()
+        self.done(self.TO_WALLPAPER)
+
     def accept(self):
+        self._save_settings()
+        super().accept()
+
+    def _save_settings(self):
         s = self._settings
         opts = self.get_options()
         s.setValue("paste/side", opts["side"])
@@ -234,7 +248,6 @@ class PasteDialog(QDialog):
         s.setValue("paste/align", opts["align"])
         s.setValue("paste/gap", opts["gap"])
         s.setValue("paste/color", self._bg.name(QColor.NameFormat.HexArgb))
-        super().accept()
 
     def get_options(self):
         return {

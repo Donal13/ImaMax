@@ -6,7 +6,7 @@ from pathlib import Path
 from PyQt6.QtCore import QEvent, QPointF, QRect, QSettings, QSize, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QAction, QColor, QCursor, QDesktopServices, QGuiApplication, QKeySequence,
-    QMouseEvent, QMovie, QPixmap, QTransform,
+    QMouseEvent, QMovie, QTransform,
 )
 from PyQt6.QtWidgets import (
     QAbstractSpinBox, QApplication, QDialog, QFileDialog, QInputDialog, QLabel,
@@ -21,7 +21,7 @@ from .dialogs import (
 )
 from .icons import icon
 from .utils import (
-    LOSSY_FORMATS, MAX_ZOOM, MIN_ZOOM, SUPPORTED_FORMATS, apply_adjustments,
+    LOSSY_FORMATS, MAX_ZOOM, MIN_ZOOM, SUPPORTED_FORMATS, apply_adjustments, clipboard_pixmap,
     compose_side_by_side, is_default_adjustments, load_image, natural_key,
     pil_to_qpixmap, qpixmap_to_pil, resize_pixmap, step_zoom,
 )
@@ -43,7 +43,7 @@ AUTOSCROLL_MAX = 40     # px per tick when dragging a crop past the view edge
 IMAGE_ACTIONS = (
     "save", "save_as", "properties", "copy", "zoom_in", "zoom_out", "zoom_fit",
     "zoom_100", "crop", "resize_img", "rot_ccw", "rot_cw", "flip_h", "flip_v",
-    "adjust", "grayscale",
+    "adjust", "grayscale", "add_to_wallpaper",
 )
 # Disabled while cropping: they would change the image under the selection
 # (and the arrow / Space / Home / End keys are needed by the crop tool)
@@ -64,6 +64,16 @@ EXTRA_SHORTCUTS = [
         ("Pan the view", "Space + drag, middle drag"),
         ("Crop", "Enter, double-click inside"),
         ("Cancel", "Esc"),
+    ]),
+    ("Wallpaper Maker", [
+        ("Select a neighbouring cell", "Arrow keys"),
+        ("Paste the clipboard beside the cell", "Ctrl+Shift+arrow"),
+        ("Reposition / zoom an image", "Drag, mouse wheel"),
+        ("Swap images, or dock one beside another", "Ctrl+drag onto a cell (centre / edge)"),
+        ("Resize cells", "Drag the gap between them"),
+        ("Fit / fill, rotate, reset the image", "F, R, 0"),
+        ("Remove the cell", "Delete"),
+        ("Add images, paste, undo", "Ctrl+O, Ctrl+V, Ctrl+Z"),
     ]),
     ("Mouse", [
         ("Zoom at the cursor", "Ctrl + wheel"),
@@ -101,6 +111,7 @@ class ImageViewer(QMainWindow):
         self._wheel_accum = 0
         self._forwarding_mouse = False
         self._chrome_state = None  # bar visibility saved while full screen
+        self._maker = None         # Wallpaper Maker window, created on first use
 
         self._autoscroll = QTimer(self)
         self._autoscroll.setInterval(30)
@@ -266,6 +277,12 @@ class ImageViewer(QMainWindow):
         act("first", "&First Image", "Home", self._on_first, "First image in the folder", "first")
         act("last", "&Last Image", "End", self._on_last, "Last image in the folder", "last")
 
+        # Tools
+        act("wallpaper", "&Wallpaper Maker…", "Ctrl+Shift+M", self._on_wallpaper_maker,
+            "Design a wallpaper from several images", "wallpaper", icon_text="Wallpaper")
+        act("add_to_wallpaper", "&Add to Wallpaper", "W", self._on_add_to_wallpaper,
+            "Add this image (or the crop selection) to the Wallpaper Maker", "add_to_wallpaper")
+
         # Help
         act("shortcuts", "&Keyboard Shortcuts", "F1", self._on_shortcuts, icon_name="keyboard")
         act("about", "&About ImaMax", None, self._on_about, icon_name="info")
@@ -280,7 +297,7 @@ class ImageViewer(QMainWindow):
         self.addToolBar(tb)
 
         groups = (("open", "save"), ("undo", "redo"), ("prev", "next"),
-                  ("rot_ccw", "rot_cw"), ("crop", "resize_img", "adjust"), ("copy", "paste_side"))
+                  ("rot_ccw", "rot_cw"), ("crop", "resize_img", "adjust"), ("copy", "paste_side", "wallpaper"))
         for i, group in enumerate(groups):
             if i:
                 tb.addSeparator()
@@ -292,9 +309,10 @@ class ImageViewer(QMainWindow):
         for k in ("properties", "delete_file", "fullscreen"):
             tb.addAction(self._actions[k])
 
-        # The signature feature gets a text label so it's easy to find
-        tb.widgetForAction(self._actions["paste_side"]).setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        # The signature features get text labels so they're easy to find
+        for k in ("paste_side", "wallpaper"):
+            tb.widgetForAction(self._actions[k]).setToolButtonStyle(
+                Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         toggle = tb.toggleViewAction()
         toggle.setText("Show &Toolbar")
         toggle.toggled.connect(self._on_toolbar_toggled)
@@ -325,6 +343,7 @@ class ImageViewer(QMainWindow):
         menu("&Image", ["crop", "resize_img", None, "rot_ccw", "rot_cw", "flip_h", "flip_v", None,
                         "adjust", "grayscale"])
         menu("&Go", ["prev", "next", None, "first", "last"])
+        menu("&Tools", ["wallpaper", "add_to_wallpaper"])
         menu("&Help", ["shortcuts", None, "about", "about_qt"])
 
     def _restore_view_settings(self):
@@ -726,15 +745,6 @@ class ImageViewer(QMainWindow):
 
     # ── Clipboard ────────────────────────────────────────────────────
 
-    def _clipboard_pixmap(self):
-        clipboard = QApplication.clipboard()
-        pixmap = clipboard.pixmap()
-        if pixmap.isNull():
-            img = clipboard.image()
-            if not img.isNull():
-                pixmap = QPixmap.fromImage(img)
-        return pixmap
-
     def _on_copy(self):
         if self._pixmap is None:
             return
@@ -748,7 +758,7 @@ class ImageViewer(QMainWindow):
             self._status_bar.showMessage("Image copied to clipboard.", 3000)
 
     def _on_paste_replace(self):
-        pixmap = self._clipboard_pixmap()
+        pixmap = clipboard_pixmap()
         if pixmap.isNull():
             QMessageBox.information(self, "Paste", "No image found on clipboard.")
             return
@@ -763,19 +773,74 @@ class ImageViewer(QMainWindow):
             self._on_paste_replace()
             return
 
-        clip_pixmap = self._clipboard_pixmap()
+        clip_pixmap = clipboard_pixmap()
         if clip_pixmap.isNull():
             QMessageBox.information(self, "Paste to Side", "No image found on clipboard.")
             return
 
         dlg = PasteDialog(self._pixmap, clip_pixmap, self._settings, self)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
+        result = dlg.exec()
         opts = dlg.get_options()
+        if result == PasteDialog.TO_WALLPAPER:
+            maker = self._wallpaper_maker()
+            name = os.path.basename(self._current_file) if self._current_file else "Untitled"
+            maker.load_pair(self._pixmap, name, clip_pixmap, "Clipboard image", opts["side"])
+            maker.show_and_raise()
+            return
+        if result != QDialog.DialogCode.Accepted:
+            return
         result = compose_side_by_side(self._pixmap, clip_pixmap, opts["side"], opts["align"],
                                       opts["gap"], opts["bg_color"], opts["scale_to_match"])
         self._set_image(result)
         self._status_bar.showMessage(f"Pasted image to the {opts['side']}.", 3000)
+
+    # ── Wallpaper Maker ──────────────────────────────────────────────
+
+    def _wallpaper_maker(self):
+        if self._maker is None:
+            from .wallpaper import WallpaperMaker  # loaded on first use
+            self._maker = WallpaperMaker(self, self._settings)
+        return self._maker
+
+    def current_image(self):
+        """(pixmap, name) being shown — just the selection while cropping — or None."""
+        if self._pixmap is None:
+            return None
+        name = os.path.basename(self._current_file) if self._current_file else "Untitled"
+        if self._crop_mode and not self._canvas.is_crop_full():
+            return self._pixmap.copy(self._canvas.crop_selection()), f"{name} (cropped)"
+        return self._pixmap, name
+
+    def receive_image(self, pixmap):
+        """Show an image made elsewhere (the Wallpaper Maker) as a new, unsaved image."""
+        if self._crop_mode:
+            self._exit_crop_mode()
+        self._current_file = None
+        self._file_size = None
+        self._set_image(pixmap)
+        self._update_title()
+        self._status_bar.showMessage("Wallpaper opened here — use Save As to keep it.", 5000)
+        self.raise_()
+        self.activateWindow()
+
+    def _on_wallpaper_maker(self):
+        maker = self._wallpaper_maker()
+        if maker.mosaic.is_empty():
+            item = self.current_image()
+            if item is not None:
+                maker.add_images([item])
+        maker.show_and_raise()
+
+    def _on_add_to_wallpaper(self):
+        item = self.current_image()
+        if item is None:
+            return
+        maker = self._wallpaper_maker()
+        maker.add_images([item])
+        n = maker.mosaic.image_count()
+        self._status_bar.showMessage(
+            f"Added to the wallpaper ({n} image{'s' if n != 1 else ''}) — "
+            "Tools ▸ Wallpaper Maker (Ctrl+Shift+M) to arrange it.", 5000)
 
     # ── Zoom / Pan ───────────────────────────────────────────────────
 
@@ -1103,11 +1168,14 @@ class ImageViewer(QMainWindow):
             m.addAction(icon("reset"), "Reset Selection").triggered.connect(self._canvas.reset_crop)
             m.addAction(icon("swap"), "Swap Orientation").triggered.connect(
                 self._crop_bar.toggle_orientation)
+            m.addAction(icon("add_to_wallpaper"), "Add Selection to Wallpaper").triggered.connect(
+                self._on_add_to_wallpaper)
         elif self._pixmap is None:
             for k in ("open", "paste_replace"):
                 m.addAction(a[k])
         else:
-            groups = (("copy", "paste_replace", "paste_side"), ("rot_ccw", "rot_cw", "crop"),
+            groups = (("copy", "paste_replace", "paste_side"), ("add_to_wallpaper",),
+                      ("rot_ccw", "rot_cw", "crop"),
                       ("zoom_fit", "zoom_100", "fullscreen"), ("open_folder", "properties"),
                       ("delete_file",))
             for i, group in enumerate(groups):
@@ -1274,6 +1342,16 @@ class ImageViewer(QMainWindow):
                 self.open_file(path)
 
     def closeEvent(self, event):
+        if self._maker is not None and self._maker.has_unsaved_work():
+            reply = QMessageBox.question(
+                self, "Wallpaper Maker",
+                "Your wallpaper design hasn't been saved and will be lost. Quit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                self._maker.show_and_raise()
+                return
         if not self._confirm_discard():
             event.ignore()
             return
