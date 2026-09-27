@@ -1,0 +1,9 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor workspace
+*.code-workspace
+
+# Stray browser downloads
+*.download

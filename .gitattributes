@@ -1,0 +1,5 @@
+# The app runs on Linux: keep LF line endings even in Windows checkouts
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
